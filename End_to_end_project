@@ -1,0 +1,70 @@
+Consider the case we have a front-end web page where user is searching through an e-commerce website . By the help of Kafka and Spark(Spark Streaming) we are tracking every movements of user and we will set-up a DB to store the activities .Here we are using Cassandra as the DB .
+Kafka has two procedures Kafka Producer(KP) and Kafka Consumer(KC) .
+The KP will be integrated with the back-end of our web application . Here it tracks all the events happing in the the web-app. KC will consume the produced messages/data from the KP .The KC is something which we will write inside the Spark Streaming .Finally we will write into Casandra .
+Pre -requisite : Install Kafka , Spark and Cassandra
+
+Version
+spark-2.1.1-bin-hadoop2.7
+apache-cassandra-3.9
+kafka_2.11-0.9.0.0
+please use these versions to get the connectivity. 
+1. Start Spark 
+sbin/start-all.sh
+2. Start Kafka 
+
+Zookeeper
+bin/zookeeper-server-start.sh config/zookeeper.properties
+
+Kafka
+bin/kafka-server-start.sh config/server.properties
+create Kafka Topic--
+bin/kafka-topics.sh --bootstrap-server localhost:9092 --topic topic1 --create --partitions 3 --replication-factor 1
+
+3. Start Cassandra-- here we create the data base and store the events .
+bin/cassandra -f 
+
+create keyspace sparkdata with replication ={'class':'SimpleStrategy','replication_factor':1};
+
+use sparkdata;
+
+CREATE TABLE cust_data (fname text , lname text , url text,product text , cnt counter ,primary key (fname,lname,url,product));
+select * from cust_data;
+4. deploy the tomcat server if you have a real time website or else please skip this part.
+5.Spark Kafka Cassandra Streaming Code
+Start the Spark Shell with below command 
+bin/spark-shell --packages "com.datastax.spark:spark-cassandra-connector_2.11:2.0.2","org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.0"
+import the followings -
+import org.apache.spark.SparkConf
+import org.apache.spark.SparkContext._
+ import org.apache.spark.streaming._
+ import org.apache.spark.streaming.StreamingContext._
+ import org.apache.spark.streaming.kafka._
+ import com.datastax.spark.connector.SomeColumns
+import com.datastax.spark.connector.cql.CassandraConnector
+import com.datastax.spark.connector.streaming._
+--now, setting properties to connect Cassandra
+ val sparkConf= new SparkConf().setAppName("KafkaSparkStreaming").set("spark.cassandra.connection.host","127.0.0.1")
+-- create a Spark streaming
+val ssc = new StreamingContext(sparkConf, Seconds(20))
+--coverting topic to map
+val topicMap = "topic1".split(",").map((_,1.toInt)).toMap
+-- Enabling streaming between spark and Kafka
+ val lines = KafkaUtils.createStream(ssc,"localhost:9092","sparkgroup",topicMap).map(_._2)
+
+-- connecting Cassandra from Spark
+lines.map(line => { val arr = line.split(","); (arr(0),arr(2),arr(3),arr(4)) }).saveToCassandra("sparkdata", "cust_data", SomeColumns("fname", "lname" , "url","product","cnt"))
+ssc.start -- start the streaming .
+
+
+Now , if you start exploring on the web-app the cassandra will be recording the activity .
+
+Now , we will see how to deploy without web application .
+We can populate the data for kafka via KP .
+--KP
+bin/kafka-console-producer.sh --broker-list localhost:9092 --topic mytopic
+whatever data we give here we will get in the Kafka consumer .
+Consumer
+bin/kafka-console-consumer.sh --zookeeper localhost:2181 --topic mytopic --from-beginning
+or
+bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic mytopic --from-beginning
+now we can see the records in the cassandra .
